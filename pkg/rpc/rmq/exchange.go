@@ -104,3 +104,29 @@ func (c *Client) ExchangeDeclare(name string, opts *DeclareExchangeOpts) error {
 
 	return nil
 }
+
+/*
+ExchangeDelete removes the named exchange from the server. When an exchange
+is deleted all queue bindings on the exchange are also deleted. If this
+exchange does not exist, the channel will be closed with an error.
+
+When ifUnused is true, the server will only delete the exchange if it has
+no queue bindings. If the exchange has queue bindings the server does not
+delete it but close the channel with an exception instead. Set this to true
+if you are not the sole owner of the exchange.
+
+When noWait is true, do not wait for a server confirmation that the exchange
+has been deleted. Failing to delete the channel could close the channel. Add
+a NotifyClose listener to respond to these channel exceptions.
+*/
+func (c *Client) ExchangeDelete(name string, ifUnused, noWait bool) error {
+	ch, err := c.conn.Channel()
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+	defer ch.Close()
+
+	err = ch.ExchangeDelete(name, ifUnused, noWait)
+	return nil
+}

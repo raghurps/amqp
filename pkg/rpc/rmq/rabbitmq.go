@@ -86,7 +86,7 @@ func (c *Client) Publish(msg amqp.Publishing, exchange, key string, opts *Publis
 	}
 	defer ch.Close()
 
-	log.Printf("Publishing message: %s\n\n\n%v\n", string(msg.Body), msg)
+	// log.Printf("Publishing message: %s\n\n\n%v\n", string(msg.Body), msg)
 
 	err = ch.Publish(
 		exchange,
@@ -191,7 +191,7 @@ func (c *Client) Subscribe(
 				continue
 			}
 
-			log.Printf("Received message: %s\n\n\n%v\n", string(msg.Body), msg)
+			//log.Printf("Received message: %s\n\n\n%v\n", string(msg.Body), msg)
 
 			if corrID != "" && msg.CorrelationId != corrID {
 				log.Printf("Re-queuing message as "+
@@ -208,6 +208,7 @@ func (c *Client) Subscribe(
 				// requeue if error happened
 				// while processing request msg
 				msg.Nack(false, true)
+				return err
 			}
 
 			msg.Ack(false)

@@ -134,3 +134,74 @@ func (c *Client) QueueBind(exchange, queue, key string, opts *QueueBindOpts) err
 
 	return nil
 }
+
+// QueueDeleteOpts ...
+type QueueDeleteOpts struct {
+	IfUnused bool // default false
+	IfEmpty  bool //default false
+	NoWait   bool // default false
+}
+
+// DefaultQueueDeleteOpts ...
+func DefaultQueueDeleteOpts() *QueueDeleteOpts {
+	return &QueueDeleteOpts{
+		NoWait: false,
+	}
+}
+
+/*
+QueueDelete deletes a queue from the server
+*/
+func (c *Client) QueueDelete(queue string, opts *QueueDeleteOpts) error {
+	defaultOpts := DefaultQueueDeleteOpts()
+
+	if opts != nil {
+		defaultOpts = opts
+	}
+
+	ch, err := c.conn.Channel()
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+	defer ch.Close()
+
+	num, err := ch.QueueDelete(
+		queue,
+		defaultOpts.IfUnused,
+		defaultOpts.IfEmpty,
+		defaultOpts.NoWait,
+	)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+	log.Printf("Queue [%s] deleted. %d messages purged.\n", queue, num)
+
+	return nil
+}
+
+/*
+QueuePurge purges messages from the queue
+
+name is the name of the queue that needs to be purged of messages
+
+noWait If noWait is true, do not wait for the server response and the number of messages purged will not be meaningful.
+*/
+func (c *Client) QueuePurge(queue string, noWait bool) error {
+	ch, err := c.conn.Channel()
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+	defer ch.Close()
+
+	num, err := ch.QueuePurge(queue, noWait)
+	if err != nil {
+		log.Println(err.Error())
+		return err
+	}
+	log.Printf("%d messages purged from queue [%s].\n", num, queue)
+
+	return nil
+}
