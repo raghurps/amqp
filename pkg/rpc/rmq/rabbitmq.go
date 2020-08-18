@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"log"
+	"time"
 
 	"github.com/streadway/amqp"
 )
@@ -21,6 +22,7 @@ type ClientPool struct {
 // Client is rabbitmq client object
 type Client struct {
 	conn *amqp.Connection
+	addr string
 }
 
 // GetRMQClient returns a RMQ client
@@ -29,21 +31,86 @@ func GetRMQClient(username, password, url, port, vhost string, secure bool) (*Cl
 	if secure {
 		connectionType = "amqps"
 	}
-	conn, err := amqp.Dial(
-		fmt.Sprintf("%s://%s:%s@%s:%s%s",
-			connectionType,
-			username,
-			password,
-			url,
-			port,
-			vhost,
-		),
+
+	addr := fmt.Sprintf("%s://%s:%s@%s:%s%s",
+		connectionType,
+		username,
+		password,
+		url,
+		port,
+		vhost,
 	)
+	conn, err := amqp.Dial(addr)
+
 	if err != nil {
 		log.Println(err.Error())
 		return &Client{}, err
 	}
-	return &Client{conn}, nil
+	return &Client{conn, addr}, nil
+}
+
+func (c *Client) reconnect(retries int, interval time.Duration) (err error) {
+	log.Println("Re-connecting to rabbitmq server...")
+	count := retries
+	for count > 0 {
+		count--
+		c.conn, err = amqp.Dial(c.addr)
+		// return if re-connect succeeded
+		if err == nil {
+			return
+		}
+
+		// Retry if re-connect failed
+		log.Println(err.Error())
+		if count > 0 {
+			log.Printf("Attempt #%d: AMQP connection failed, retrying after %s ...\n", retries-count, interval)
+			time.Sleep(interval)
+			continue
+		}
+		return
+	}
+	return
+}
+
+// ChannelOpts ...
+type ChannelOpts struct {
+	PrefetchCount int
+	PrefetchSize  int
+	Global        bool
+}
+
+// DefaultChannelOpts ...
+func DefaultChannelOpts() *ChannelOpts {
+	return &ChannelOpts{
+		PrefetchCount: 1,
+		PrefetchSize:  0,
+		Global:        false,
+	}
+}
+
+func (c *Client) getChannel(opts *ChannelOpts) (ch *amqp.Channel, err error) {
+	ch, err = c.conn.Channel()
+	if err != nil {
+		log.Println(err.Error())
+		return
+	}
+
+	defaultOpts := DefaultChannelOpts()
+
+	if opts != nil {
+		defaultOpts = opts
+	}
+
+	err = ch.Qos(
+		defaultOpts.PrefetchCount, // prefetch count
+		defaultOpts.PrefetchSize,  // prefetch size
+		defaultOpts.Global,        // global
+	)
+	if err != nil {
+		log.Println(err.Error())
+		return
+	}
+	return
 }
 
 // PublishOpts ...
@@ -104,7 +171,26 @@ func (c *Client) Publish(msg amqp.Publishing, exchange, key string, opts *Publis
 }
 
 // SubscribeOpts ...
-type SubscribeOpts struct{}
+type SubscribeOpts struct {
+	CorrelationID      string        // Correlation ID
+	Reconnect          bool          // Reconnect if connection closed
+	ReconnectRetries   int           // Number of retries for reconnecting
+	ReconnectInterval  time.Duration // Interval to wait before retrying connection
+	ListenIndefinitely bool          // Listen indefinitely
+	PublishResponse    bool          // Publish response from handler
+}
+
+// DefaultSubscribeOpts ...
+func DefaultSubscribeOpts() *SubscribeOpts {
+	return &SubscribeOpts{
+		"",
+		false,
+		0,
+		0 * time.Second,
+		false,
+		false,
+	}
+}
 
 /*
 Subscribe subscribes you to receive messages from a queue.
@@ -136,13 +222,12 @@ return response(optional, see publishResponse flag defn) and error object.
 func (c *Client) Subscribe(
 	ctx context.Context,
 	queue string,
-	corrID string,
-	indefinitely bool,
-	publishResponse bool,
+	opts *SubscribeOpts,
+	chanOpts *ChannelOpts,
 	handler func(amqp.Delivery) (amqp.Publishing, error),
 ) error {
 
-	ch, err := c.conn.Channel()
+	ch, err := c.getChannel(chanOpts)
 	if err != nil {
 		log.Println(err.Error())
 		return err
@@ -151,15 +236,15 @@ func (c *Client) Subscribe(
 
 	// Ensure a consumer does not consume another message unless it has processed
 	// the last message
-	err = ch.Qos(
-		1,     // prefetch count
-		0,     // prefetch size
-		false, // global
-	)
-	if err != nil {
-		log.Println(err.Error())
-		return err
-	}
+	//err = ch.Qos(
+	//	1,     // prefetch count
+	//	0,     // prefetch size
+	//	false, // global
+	//)
+	//if err != nil {
+	//	log.Println(err.Error())
+	//	return err
+	//}
 
 	msgs, err := ch.Consume(
 		queue,
@@ -181,6 +266,33 @@ func (c *Client) Subscribe(
 		// overwhelming the select clause
 		if c.conn.IsClosed() {
 			log.Println("Connection closed/interrupted...")
+			if opts.Reconnect {
+				err = c.reconnect(opts.ReconnectRetries, opts.ReconnectInterval)
+				if err != nil {
+					return err
+				}
+
+				ch, err = c.getChannel(chanOpts)
+				if err != nil {
+					return err
+				}
+
+				msgs, err = ch.Consume(
+					queue,
+					"",
+					false,
+					false,
+					false,
+					false,
+					nil,
+				)
+				if err != nil {
+					log.Println(err.Error())
+					return err
+				}
+
+				continue
+			}
 			return errors.New("connection closed/interrupted")
 		}
 
@@ -193,10 +305,10 @@ func (c *Client) Subscribe(
 
 			//log.Printf("Received message: %s\n\n\n%v\n", string(msg.Body), msg)
 
-			if corrID != "" && msg.CorrelationId != corrID {
+			if opts.CorrelationID != "" && msg.CorrelationId != opts.CorrelationID {
 				log.Printf("Re-queuing message as "+
 					"correlationIDs don't match. Got: [%s] Expected: [%s]\n",
-					msg.CorrelationId, corrID)
+					msg.CorrelationId, opts.CorrelationID)
 				msg.Nack(false, true)
 				continue
 			}
@@ -215,7 +327,7 @@ func (c *Client) Subscribe(
 
 			// If subscriber doesn't want to publish response
 			// skip the response publishing part
-			if publishResponse {
+			if opts.PublishResponse {
 				err = ch.Publish(
 					msg.Exchange,
 					msg.ReplyTo,
@@ -231,7 +343,7 @@ func (c *Client) Subscribe(
 
 			// Listen indefinitely
 			// if requested
-			if indefinitely {
+			if opts.ListenIndefinitely {
 				continue
 			}
 

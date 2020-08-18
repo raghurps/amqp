@@ -19,9 +19,8 @@ type RabbitMQRPC interface {
 	Subscribe(
 		context.Context,
 		string,
-		string,
-		bool,
-		bool,
+		*rmq.SubscribeOpts,
+		*rmq.ChannelOpts,
 		func(amqp.Delivery) (amqp.Publishing, error),
 	) error
 }

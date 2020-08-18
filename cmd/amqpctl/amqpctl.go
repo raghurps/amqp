@@ -89,6 +89,7 @@ func produce(c *cli.Context) error {
 		log.Println(err.Error())
 		return err
 	}
+	log.Printf("Published message: %s", c.String("message"))
 	return nil
 }
 
@@ -100,13 +101,17 @@ func consumer(c *cli.Context) error {
 	}
 	ctx, cancel := context.WithCancel(context.TODO())
 	defer cancel()
+
+	subsOpt := rmq.DefaultSubscribeOpts()
+
+	chanOpts := rmq.DefaultChannelOpts()
 	err := client.Subscribe(
 		ctx,
 		c.String("queue"),
-		"",
-		false,
-		false,
+		subsOpt,
+		chanOpts,
 		func(msg amqp.Delivery) (amqp.Publishing, error) {
+			log.Printf("Received message: %s", string(msg.Body))
 			return amqp.Publishing{}, nil
 		},
 	)
