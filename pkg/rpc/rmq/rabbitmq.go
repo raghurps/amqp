@@ -21,12 +21,30 @@ type ClientPool struct {
 
 // Client is rabbitmq client object
 type Client struct {
-	conn *amqp.Connection
 	addr string
 }
 
+// ConnectOpts to specify whether user wants
+// to reconnect if connection closes or fails
+type ConnectOpts struct {
+	ReconnectRetries  int           // Number of retries for reconnecting
+	ReconnectInterval time.Duration // Interval to wait before retrying connection
+}
+
+// DefaultConnectOpts returns default connect
+// options
+func DefaultConnectOpts() *ConnectOpts {
+	return &ConnectOpts{
+		ReconnectRetries:  0,
+		ReconnectInterval: 0 * time.Second,
+	}
+}
+
 // GetRMQClient returns a RMQ client
-func GetRMQClient(username, password, url, port, vhost string, secure bool) (*Client, error) {
+func GetRMQClient(
+	username, password, url, port, vhost string,
+	secure bool) *Client {
+
 	connectionType := "amqp"
 	if secure {
 		connectionType = "amqps"
@@ -40,21 +58,22 @@ func GetRMQClient(username, password, url, port, vhost string, secure bool) (*Cl
 		port,
 		vhost,
 	)
-	conn, err := amqp.Dial(addr)
 
-	if err != nil {
-		log.Println(err.Error())
-		return &Client{}, err
-	}
-	return &Client{conn, addr}, nil
+	return &Client{addr}
 }
 
-func (c *Client) reconnect(retries int, interval time.Duration) (err error) {
+func (c *Client) connect(opts *ConnectOpts) (conn *amqp.Connection, err error) {
+	defaultOpts := DefaultConnectOpts()
+
+	if opts != nil {
+		defaultOpts = opts
+	}
+
 	log.Println("Re-connecting to rabbitmq server...")
-	count := retries
+	count := defaultOpts.ReconnectRetries
 	for count > 0 {
 		count--
-		c.conn, err = amqp.Dial(c.addr)
+		conn, err = amqp.Dial(c.addr)
 		// return if re-connect succeeded
 		if err == nil {
 			return
@@ -63,8 +82,10 @@ func (c *Client) reconnect(retries int, interval time.Duration) (err error) {
 		// Retry if re-connect failed
 		log.Println(err.Error())
 		if count > 0 {
-			log.Printf("Attempt #%d: AMQP connection failed, retrying after %s ...\n", retries-count, interval)
-			time.Sleep(interval)
+			log.Printf("Attempt #%d: AMQP connection failed, retrying after %s ...\n",
+				defaultOpts.ReconnectRetries-count,
+				defaultOpts.ReconnectInterval)
+			time.Sleep(defaultOpts.ReconnectInterval)
 			continue
 		}
 		return
@@ -88,10 +109,9 @@ func DefaultChannelOpts() *ChannelOpts {
 	}
 }
 
-func (c *Client) getChannel(opts *ChannelOpts) (ch *amqp.Channel, err error) {
-	ch, err = c.conn.Channel()
+func (c *Client) getChannel(conn *amqp.Connection, opts *ChannelOpts) (ch *amqp.Channel, err error) {
+	ch, err = conn.Channel()
 	if err != nil {
-		log.Println(err.Error())
 		return
 	}
 
@@ -107,7 +127,6 @@ func (c *Client) getChannel(opts *ChannelOpts) (ch *amqp.Channel, err error) {
 		defaultOpts.Global,        // global
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return
 	}
 	return
@@ -138,17 +157,30 @@ key is the routing key that will be used for routing the message on exchange
 to different queues
 
 opts is option for publishing a message
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) Publish(msg amqp.Publishing, exchange, key string, opts *PublishOpts) error {
+func (c *Client) Publish(msg amqp.Publishing, exchange, key string, opts *PublishOpts, connOpts *ConnectOpts) error {
 	defaultOpts := DefaultPublishOpts()
 
 	if opts != nil {
 		defaultOpts = opts
 	}
 
-	ch, err := c.conn.Channel()
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
@@ -163,7 +195,6 @@ func (c *Client) Publish(msg amqp.Publishing, exchange, key string, opts *Publis
 		msg,
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return err
 	}
 
@@ -172,12 +203,10 @@ func (c *Client) Publish(msg amqp.Publishing, exchange, key string, opts *Publis
 
 // SubscribeOpts ...
 type SubscribeOpts struct {
-	CorrelationID      string        // Correlation ID
-	Reconnect          bool          // Reconnect if connection closed
-	ReconnectRetries   int           // Number of retries for reconnecting
-	ReconnectInterval  time.Duration // Interval to wait before retrying connection
-	ListenIndefinitely bool          // Listen indefinitely
-	PublishResponse    bool          // Publish response from handler
+	CorrelationID      string // Correlation ID
+	Reconnect          bool   // Reconnect if connection closed
+	ListenIndefinitely bool   // Listen indefinitely
+	PublishResponse    bool   // Publish response from handler
 }
 
 // DefaultSubscribeOpts ...
@@ -185,8 +214,6 @@ func DefaultSubscribeOpts() *SubscribeOpts {
 	return &SubscribeOpts{
 		"",
 		false,
-		0,
-		0 * time.Second,
 		false,
 		false,
 	}
@@ -202,19 +229,11 @@ ctx is the context object that can be used for signaling ctx.Done()
 
 queue is the name of the queue from it will receive messages
 
-corrID is the correlation ID that can be used for filtering specific
-messages that can be a reply to previously published message. If empty
-string is provided, it will process all the messages. If it is not empty
-and corrID doesn't match the message's CorrelationId, the message is not
-acknowledged and is re-queued.
+opts is subscribe option which provides information like correlation ID to
+look for, listen indefinitley, publish response from handler
 
-indefinitely is a flag that can be used to specify whether the subscriber
-should be listening to the messages on the queue indefinitely or return
-just after processing one message.
-
-publishResponse is a flag that can be used to specify whether the response
-from the handler function should be published on the message's replyTo
-key on the exchange.
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 
 handler is a function that will process the incoming messages and it should
 return response(optional, see publishResponse flag defn) and error object.
@@ -224,12 +243,23 @@ func (c *Client) Subscribe(
 	queue string,
 	opts *SubscribeOpts,
 	chanOpts *ChannelOpts,
+	connOpts *ConnectOpts,
 	handler func(amqp.Delivery) (amqp.Publishing, error),
 ) error {
 
-	ch, err := c.getChannel(chanOpts)
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := c.getChannel(conn, chanOpts)
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
@@ -256,7 +286,6 @@ func (c *Client) Subscribe(
 		nil,
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return err
 	}
 
@@ -264,15 +293,15 @@ func (c *Client) Subscribe(
 		// Need to check if connection is closed or else
 		// msgs channel starts dumping empty messages
 		// overwhelming the select clause
-		if c.conn.IsClosed() {
+		if conn.IsClosed() {
 			log.Println("Connection closed/interrupted...")
 			if opts.Reconnect {
-				err = c.reconnect(opts.ReconnectRetries, opts.ReconnectInterval)
+				conn, err = c.connect(defaultConnOpts)
 				if err != nil {
 					return err
 				}
 
-				ch, err = c.getChannel(chanOpts)
+				ch, err = c.getChannel(conn, chanOpts)
 				if err != nil {
 					return err
 				}
@@ -287,7 +316,6 @@ func (c *Client) Subscribe(
 					nil,
 				)
 				if err != nil {
-					log.Println(err.Error())
 					return err
 				}
 
@@ -316,7 +344,6 @@ func (c *Client) Subscribe(
 			// call handler to process message
 			resp, err := handler(msg)
 			if err != nil {
-				log.Println(err.Error())
 				// requeue if error happened
 				// while processing request msg
 				msg.Nack(false, true)
@@ -336,7 +363,6 @@ func (c *Client) Subscribe(
 					resp,
 				)
 				if err != nil {
-					log.Println(err.Error())
 					return err
 				}
 			}

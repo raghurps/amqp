@@ -1,31 +1,43 @@
 # amqp
+
 Use this library to make rpc calls over rabbit MQ using amqp protocol
 
-# Quickstart
-### Download library 
+## Quickstart
+
+### Download library
+
+```bash
+go get -u github.com/raghuP9/amqp
 ```
-# go get -u github.com/raghuP9/amqp
-```
+
 ### Test with example
+
 #### Generate amqpctl binary
+
+```bash
+go get -u github.com/raghuP9/amqp/cmd/amqpctl
+$GOPATH/bin/amqpctl --help
 ```
-# go get -u github.com/raghuP9/amqp/cmd/amqpctl
-# $GOPATH/bin/amqpctl --help
-```
+
 #### Publish message
+
+```bash
+$GOPATH/bin/amqpctl --server rabbitmq.example.com --port 5672 --username <username> --password <password> producer
 ```
-# $GOPATH/bin/amqpctl --server rabbitmq.example.com --port 5672 --username <username> --password <password> producer
-```
+
 #### Consume message
-```
-# $GOPATH/bin/amqpctl --server rabbitmq.example.com --port 5672 --username <username> --password <password> consumer
+
+```bash
+$GOPATH/bin/amqpctl --server rabbitmq.example.com --port 5672 --username <username> --password <password> consumer
 ```
 
 ### Use in go code
+
 GoDoc [Link](https://pkg.go.dev/github.com/raghuP9/amqp@v0.0.2/pkg/rpc/rmq)
 
 #### Create client object
-```
+
+```go
 package main
 
 import (
@@ -43,62 +55,93 @@ func main() {
   )
 }
 ```
+
 #### Declare exchange
+
+```go
+err := client.ExchangeDeclare(
+  "exchange-name",
+  rmq.DefaultExchangeDeclareOpts(),
+  rmq.DefaultConnectOpts(),
+  )
 ```
-err := client.ExchangeDeclare("exchange-name", rmq.DefaultExchangeDeclareOpts())
-```
+
 #### Delete exchange
-```
+
+```go
 err := client.ExchangeDelete(
   "exchange-name",  // Exchange name
   true,             // IfUnused: Remove exchange if no queue bound to this exchange
   false,            // NoWait: Do not wait for deletion confirmation from rabbitmq server
 )
 ```
+
 #### Declare queue
+
+```go
+err := client.QueueDeclare(
+  "queue-name",
+  rmq.DefaultDeclareQueueOpts(),
+  rmq.DefaultConnectOpts(),
+  )
 ```
-err := client.QueueDeclare("queue-name", rmq.DefaultDeclareQueueOpts())
-```
+
 #### Bind queue to an exchage using routing key
-```
+
+```go
 err := client.QueueBind(
   "exchange-name",
   "queue-name",
   "routing-key",
   rmq.DefaultQueueBindOpts(),
+  rmq.DefaultConnectOpts(),
 )
 ```
+
 #### Delete queue
+
+```go
+err := client.QueueDelete(
+  "queue-name",
+  rmq.DefaultQueueDeleteOpts(),
+  rmq.DefaultConnectOpts(),
+  )
 ```
-err := client.QueueDelete("queue-name", rmq.DefaultQueueDeleteOpts())
-```
+
 #### Purge queue
-```
+
+```go
 err := client.QueuePurge(
   "queue-name",
   false,        // NoWait: do not wait for confirmation from rabbitmq server and return
+  rmq.DefaultConnectOpts(),
 )
 ```
-#### Publish message
-```
+
+#### Publish messages
+
+```go
 import "github.com/streadway/amqp"
 
 func doSomething() {
   err := client.Publish(
     amqp.Publishing{
       Body:         []byte(c.String("message")),
-			DeliveryMode: amqp.Persistent,
-			ContentType:  "plain/text",
-			Timestamp:    time.Now(),
+      DeliveryMode: amqp.Persistent,
+      ContentType:  "plain/text",
+      Timestamp:    time.Now(),
     },
     "exchange-name",
     "routing-key",
     rmq.DefaultPublishOpts(),
+    rmq.DefaultConnectOpts(),
   )
 }
 ```
+
 #### Subscribe to a queue for messages and take actions on different messages
-```
+
+```go
 import "github.com/streadway/amqp"
 
 func handler(msg amqp.Delivery) (amqp.Publishing, error) {
@@ -111,6 +154,7 @@ func doSomething() {
     "queue-name",                // Name of the queue
     rmq.DefaultSubscribeOpts(),  // Provide options such as correlation ID, listen indefinitely on the queue, reconnect if disconnected, publish response from handler function
     rmq.DefaultChannelOpts(),    // Set Qos e.g. do not pick another message from queue unless previous message is processed.
+    rmq.DefaultConnectOpts(),
     handler,                     // handler function that takes received message, processes it and returns response message, can be anonymous fn.
   )
 }

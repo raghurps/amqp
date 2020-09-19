@@ -58,17 +58,35 @@ QueueDeclare declares a queue on the RabbitMQ server
 name is the name of queue
 
 opts is the options for declaring a queue
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) QueueDeclare(name string, opts *DeclareQueueOpts) (amqp.Queue, error) {
+func (c *Client) QueueDeclare(
+	name string,
+	opts *DeclareQueueOpts,
+	connOpts *ConnectOpts) (amqp.Queue, error) {
 	defaultOpts := DefaultDeclareQueueOpts()
 
 	if opts != nil {
 		defaultOpts = opts
 	}
+
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
 	var q amqp.Queue
-	ch, err := c.conn.Channel()
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return q, err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return q, err
 	}
 	defer ch.Close()
@@ -82,7 +100,6 @@ func (c *Client) QueueDeclare(name string, opts *DeclareQueueOpts) (amqp.Queue, 
 		defaultOpts.Args,
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return q, err
 	}
 
@@ -105,17 +122,42 @@ func DefaultQueueBindOpts() *QueueBindOpts {
 
 /*
 QueueBind binds a queue to an exchange with provided routing key on the RabbitMQ server
+
+exchange name to bind with the queue
+
+queue name to bind with the exchange
+
+key used for routing messages on exchange to the queue
+
+opts providing queue binding options
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) QueueBind(exchange, queue, key string, opts *QueueBindOpts) error {
+func (c *Client) QueueBind(
+	exchange, queue, key string,
+	opts *QueueBindOpts,
+	connOpts *ConnectOpts) error {
+
 	defaultOpts := DefaultQueueBindOpts()
 
 	if opts != nil {
 		defaultOpts = opts
 	}
 
-	ch, err := c.conn.Channel()
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
@@ -128,7 +170,6 @@ func (c *Client) QueueBind(exchange, queue, key string, opts *QueueBindOpts) err
 		defaultOpts.Args,
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return err
 	}
 
@@ -151,17 +192,38 @@ func DefaultQueueDeleteOpts() *QueueDeleteOpts {
 
 /*
 QueueDelete deletes a queue from the server
+
+queue name that you want to delete
+
+opts providing options for deleting queue
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) QueueDelete(queue string, opts *QueueDeleteOpts) error {
+func (c *Client) QueueDelete(
+	queue string,
+	opts *QueueDeleteOpts,
+	connOpts *ConnectOpts) error {
+
 	defaultOpts := DefaultQueueDeleteOpts()
 
 	if opts != nil {
 		defaultOpts = opts
 	}
 
-	ch, err := c.conn.Channel()
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
@@ -173,7 +235,6 @@ func (c *Client) QueueDelete(queue string, opts *QueueDeleteOpts) error {
 		defaultOpts.NoWait,
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return err
 	}
 	log.Printf("Queue [%s] deleted. %d messages purged.\n", queue, num)
@@ -186,19 +247,32 @@ QueuePurge purges messages from the queue
 
 name is the name of the queue that needs to be purged of messages
 
-noWait If noWait is true, do not wait for the server response and the number of messages purged will not be meaningful.
+noWait If noWait is true, do not wait for the server response and
+the number of messages purged will not be meaningful.
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) QueuePurge(queue string, noWait bool) error {
-	ch, err := c.conn.Channel()
+func (c *Client) QueuePurge(queue string, noWait bool, connOpts *ConnectOpts) error {
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
 
 	num, err := ch.QueuePurge(queue, noWait)
 	if err != nil {
-		log.Println(err.Error())
 		return err
 	}
 	log.Printf("%d messages purged from queue [%s].\n", num, queue)

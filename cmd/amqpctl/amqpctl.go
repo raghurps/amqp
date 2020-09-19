@@ -19,7 +19,7 @@ var client *rmq.Client
 func bootstrap(c rpc.RabbitMQRPC, queue string) error {
 
 	// Declare queue if it doesn't exist
-	_, err := c.QueueDeclare(queue, nil)
+	_, err := c.QueueDeclare(queue, nil, nil)
 	if err != nil {
 		log.Println(err.Error())
 		return err
@@ -37,7 +37,7 @@ func getRMQClient(c *cli.Context) *rmq.Client {
 	secure := c.Bool("secure")
 	queue := c.String("queue")
 
-	client, err := rmq.GetRMQClient(
+	client := rmq.GetRMQClient(
 		username,
 		password,
 		serverURL,
@@ -45,12 +45,8 @@ func getRMQClient(c *cli.Context) *rmq.Client {
 		vhost,
 		secure,
 	)
-	if err != nil {
-		log.Println(err.Error())
-		return nil
-	}
 
-	err = bootstrap(client, queue)
+	err := bootstrap(client, queue)
 	if err != nil {
 		log.Println(err.Error())
 		return nil
@@ -84,6 +80,7 @@ func produce(c *cli.Context) error {
 		"",
 		c.String("queue"),
 		nil,
+		nil,
 	)
 	if err != nil {
 		log.Println(err.Error())
@@ -110,6 +107,7 @@ func consumer(c *cli.Context) error {
 		c.String("queue"),
 		subsOpt,
 		chanOpts,
+		nil,
 		func(msg amqp.Delivery) (amqp.Publishing, error) {
 			log.Printf("Received message: %s", string(msg.Body))
 			return amqp.Publishing{}, nil
