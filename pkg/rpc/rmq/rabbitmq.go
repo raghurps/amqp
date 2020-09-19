@@ -69,9 +69,8 @@ func (c *Client) connect(opts *ConnectOpts) (conn *amqp.Connection, err error) {
 		defaultOpts = opts
 	}
 
-	log.Println("Re-connecting to rabbitmq server...")
 	count := defaultOpts.ReconnectRetries
-	for count > 0 {
+	for count >= 0 { // connect at least once
 		count--
 		conn, err = amqp.Dial(c.addr)
 		// return if re-connect succeeded
