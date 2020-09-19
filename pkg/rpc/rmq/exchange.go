@@ -1,8 +1,6 @@
 package rmq
 
 import (
-	"log"
-
 	"github.com/streadway/amqp"
 )
 
@@ -73,17 +71,31 @@ ExchangeDeclare declares an exchange on the RabbitMQ server
 name is name of the exhange
 
 opts is options for declaring an exchange
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) ExchangeDeclare(name string, opts *DeclareExchangeOpts) error {
+func (c *Client) ExchangeDeclare(name string, opts *DeclareExchangeOpts, connOpts *ConnectOpts) error {
 	defaultOpts := DefaultDeclareExchangeOpts()
 
 	// update defaultOpts if opts provided
 	if opts != nil {
 		defaultOpts = opts
 	}
-	ch, err := c.conn.Channel()
+
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
@@ -98,7 +110,6 @@ func (c *Client) ExchangeDeclare(name string, opts *DeclareExchangeOpts) error {
 		defaultOpts.Args,        // arguments
 	)
 	if err != nil {
-		log.Println(err.Error())
 		return err
 	}
 
@@ -118,11 +129,25 @@ if you are not the sole owner of the exchange.
 When noWait is true, do not wait for a server confirmation that the exchange
 has been deleted. Failing to delete the channel could close the channel. Add
 a NotifyClose listener to respond to these channel exceptions.
+
+connOpts provides connection options such as retry to connect if connection
+closes or fails and number of retries to attempt.
 */
-func (c *Client) ExchangeDelete(name string, ifUnused, noWait bool) error {
-	ch, err := c.conn.Channel()
+func (c *Client) ExchangeDelete(name string, ifUnused, noWait bool, connOpts *ConnectOpts) error {
+
+	defaultConnOpts := DefaultConnectOpts()
+	if connOpts != nil {
+		defaultConnOpts = connOpts
+	}
+
+	conn, err := c.connect(defaultConnOpts)
 	if err != nil {
-		log.Println(err.Error())
+		return err
+	}
+	defer conn.Close()
+
+	ch, err := conn.Channel()
+	if err != nil {
 		return err
 	}
 	defer ch.Close()
