@@ -1,3 +1,5 @@
+[![Gitpod ready-to-code](https://img.shields.io/badge/Gitpod-ready--to--code-blue?logo=gitpod)](https://raghu-gitpod.platform9.horse/#https://github.com/raghuP9/amqp)
+
 # amqp
 
 Use this library to make rpc calls over rabbit MQ using amqp protocol
